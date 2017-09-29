@@ -3,33 +3,39 @@
 ### Configuration
 #####################################################################
 
-# Environment variables and their defaults
-arg_help=0
-arg_debug=0
-arg_dryrun=0
-arg_test=0
-arg_sample=0
-arg_pid=$$
-arg_conf=0
-LOG_FILE='/var/log/sample.log'
-HOST_ID=`/bin/hostname`
-LOCK_FILE='/var/run/sample.lock'
-
+function initialization() {
+    # Environment variables and their defaults
+    arg_help=0
+    arg_debug=0
+    arg_trace=0
+    arg_dryrun=0
+    arg_test=0
+    arg_sample=0
+    arg_pid=$$
+    arg_conf=0
+    LOG_FILE='/var/log/sample.log'
+    HOST_ID=`/bin/hostname`
+    LOCK_FILE='/var/run/sample.lock'
+}
 
 ### Options
 #####################################################################
 
-# Command-line options.
-read -r -d '' usage <<-'EOF'
-OPTIONS:
-  -d                        Enables debug mode
-  -h                        Help
-  -n                        Dry Run
-  -c <conf_file_path>       Configuration File
-  --test_option             This is a test option
-  --sample_option[=value]   This is a sample option
+function get_options() {
+    # Command-line options.
+    read -r -d '' usage <<-'EOF'
+    OPTIONS:
+       -d                        Enables debug mode
+       -h                        Help
+       -n                        Dry Run
+       -t                        Enable trace mode
+       -c <conf_file_path>       Configuration File
+       --test_option             This is a test option
+       --sample_option[=value]   This is a sample option
 EOF
 
+    parse_options $*
+}
 
 ### Functions
 #####################################################################
@@ -60,6 +66,78 @@ function critical() { echo "$(_fmt critical) ${@}" >> ${LOG_FILE} || true; }
 function info() { echo "$(_fmt info) ${@}" >> ${LOG_FILE} || true; }
 function debug() { echo "$(_fmt debug) ${@}" >> ${LOG_FILE} || true; }
 
+### Parse command-line options
+#####################################################################
+
+function parse_options() {
+    # Help if no options.
+    if [[ -z $@ ]]; then
+        help "Sample Help"
+        exit 1
+    elif [[ ! $@ =~ ^- ]];then
+        help "$0: Error - Unrecognized option"
+        exit 1
+    fi
+
+    argv=( $@ )
+
+    OPTION=`getopt -o dthnc: --long test_option,sample_option:: -n "$0" -- "${argv[@]}" 2> /dev/null`
+    if [ $? -ne 0 ];then
+        help "$0: Error - Unrecognized option"
+        exit 1
+    fi
+    eval set -- "${OPTION}"
+    
+    # extract options and their arguments into variables.
+    while true ; do
+        case "$1" in
+            -d) # enable debug
+                arg_debug=1
+                shift;;
+            -t) # enable strace
+                arg_trace=1
+                shift ;;
+            -h) # show help
+                arg_help=1
+                shift ;;
+            -n)
+                arg_dryrun=1
+                shift ;;
+            --test_option)
+                arg_test=1
+                shift ;;
+            --sample_option)
+                arg_sample=1
+                [[ -n $2 ]] && sample_value=$2
+                shift 2 ;;
+            -c)
+                CONF_FILE=$2
+                [[ -z ${CONF_FILE} ]] && { help "$0: Provide a valid config file."; exit 1; }
+                [[ "${CONF_FILE}" =~ ^- ]] && { help "$0: Provide config file"; exit 1; }
+                arg_conf=1
+                shift 2 ;;
+            --) shift ; break ;;
+            *) echo "Internal error!" ; critical 'Internal error! Get options failed.'; exit 1 ;;
+        esac
+    done
+
+    # validating to avoid options provided simultaneously.
+    [[ ${arg_test} -eq 1 ]] && [[ ${arg_sample} -eq 1 ]] && { help "$0: test and sample cannot be used together."; exit 1; }
+
+    # help mode
+    if [ "${arg_help}" = "1" ]; then
+        # Help exists with code 1
+        help 'Sample Help'
+        exit 0
+    fi
+
+    # debug mode
+    if [ "${arg_trace}" = "1" ]; then
+        set -o xtrace
+    fi
+}
+
+
 # Function to display help.
 function help() {
     echo "" 1>&2
@@ -84,10 +162,22 @@ function _progend() {
 }
 
 # Function to cleanup on exit.
-function cleanup_before_exit() {
+function cleanup_on_trap() {
+    ((${arg_debug})) && debug 'Trap detected and hence stopping the program.'
+    ((${arg_debug})) && debug "Removing lock file ${LOCK_FILE} and temp file ${TMP_FILE}."
     unlink ${TMP_FILE}
     unlink ${LOCK_FILE}
     _progend
+   exit 3
+}
+
+function _exit() {
+    exit_status=$1
+    ((${arg_debug})) && debug "Removing lock file ${LOCK_FILE} and temp file ${TMP_FILE}."
+    unlink ${TMP_FILE}
+    unlink ${LOCK_FILE}
+    _progend
+    exit ${exit_status}
 }
 
 # Function for sample prog.
@@ -102,81 +192,23 @@ function _test() {
     prog_test
 }
 
-### Parse command-line options
-#####################################################################
-
-# Help if no options.
-if [[ -z $@ ]]; then
-    help "Sample Help"
-    exit 1
-elif [[ ! $@ =~ ^- ]];then
-    help "$0: Error - Unrecognized option"
-    exit 1
-fi
-
-argv=( $@ )
-
-OPTION=`getopt -o dhnc: --long test_option,sample_option:: -n "$0" -- "${argv[@]}" 2> /dev/null`
-if [ $? -ne 0 ];then
-    help "$0: Error - Unrecognized option"
-    exit 1
-fi
-eval set -- "${OPTION}"
-
-[[ `echo ${OPTION} | grep -o 'option' | wc -l` > 1 ]] && { help "$0: Use any one option at a time."; exit 1; }
-
-# extract options and their arguments into variables.
-while true ; do
-    case "$1" in
-        -d) # enable debug
-            arg_debug=1
-            shift;;
-        -h) # show help
-            arg_help=1
-            shift ;;
-        -n)
-            arg_dryrun=1
-            shift ;;
-        --test_option)
-            arg_test=1
-            shift ;;
-        --sample_option)
-            arg_sample=1
-            [[ -n $2 ]] && sample_value=$2
-            shift 2 ;;
-        -c)
-            CONF_FILE=$2
-            [[ -z ${CONF_FILE} ]] && { help "$0: Provide a valid config file."; exit 1; }
-            [[ "${CONF_FILE}" =~ ^- ]] && { help "$0: Provide config file"; exit 1; }
-            arg_conf=1
-            shift 2 ;;
-        --) shift ; break ;;
-        *) echo "Internal error!" ; critical 'Internal error! Get options failed.'; exit 1 ;;
-    esac
-done
-
-[[ ${arg_test} -eq 1 ]] && [[ ${arg_sample} -eq 1 ]] && { help "$0: test and sample cannot be used together."; exit 1; }
-
-# help mode
-if [ "${arg_help}" = "1" ]; then
-    # Help exists with code 1
-    help 'Sample Help'
-    exit 0
-fi
-
-# debug mode
-if [ "${arg_debug}" = "1" ]; then
-    set -o xtrace
-fi
-
-
 ### Runtime
 #####################################################################
 
 _main() {
+    initialization
+    get_options $*
+    
+    if [[ $EUID -ne 0 ]]; then
+        echo 'Please run this as root user'
+        exit 1
+    fi
+    
     STARTTIME=`date +%s%N | cut -b1-13`
-    TMP_FILE=`mktemp /tmp/sample_temp.XXXXXXXXXX`
     info "Sample started at ${STARTTIME} milliseconds"
+    TMP_FILE=`mktemp /tmp/sample_temp.XXXXXXXXXX`
+    ((${arg_debug})) && debug "Created temp file ${TMP_FILE}."
+
     # Exit on error. Append ||true if you expect an error.
     set -o errexit
     set -o nounset
@@ -184,23 +216,27 @@ _main() {
     # Bash will remember & return the highest exit code in a chain of pipes.
     set -o pipefail
 
-    trap cleanup_on_trap INT TERM EXIT
-
     if [[ -e ${LOCK_FILE} ]]; then
-       running_pid=`cat ${LOCK_FILE}`
-       critical "Process already running with PID ${running_pid}"
-       exit 1
+        running_pid=`cat ${LOCK_FILE}`
+        critical "Process already running with PID ${running_pid}"
+        exit 1
     else
-       echo "${arg_pid}" > ${LOCK_FILE}
+        ((${arg_debug})) && debug "Creating lock file ${LOCK_FILE}."
+        echo "${arg_pid}" > ${LOCK_FILE}
     fi
+
+    trap cleanup_on_trap INT TERM
     
     if [[ ${arg_conf} -eq 1 ]]; then
         source file_tests.sh
+        ((${arg_debug})) && debug "Running config file test against ${CONF_FILE}."
         if ! file_tests ${CONF_FILE}; then
     	    critical "Sample Config File ${CONF_FILE} doesn't exist or not readable."
-            exit 1
+            _exit 1
         fi
+        ((${arg_debug})) && debug "Config file tests completed on ${CONF_FILE}."
 
+        ((${arg_debug})) && debug "Running file validation test against config file ${CONF_FILE}."
         # conf file validation.
         while read line; do
             if [[ $line =~ ^$ ]]; then
@@ -212,18 +248,21 @@ _main() {
             else
                 critical "Check the validity of config file ${CONF_FILE}."
                 critical "Suggestion: ${line} remove any special or space characters around = "
-                exit 1
+                _exit 1
             fi
         done < ${CONF_FILE}
+        ((${arg_debug})) && debug "File validation test complete on config file ${CONF_FILE}."
     
         # Load the config file to read the variables.
         source ${CONF_FILE}
     fi
     
+    ((${arg_debug})) && debug 'Running main subroutines.'
     [[ ${arg_test} -eq 1 ]] && _test
     [[ ${arg_sample} -eq 1 ]] && _sample
-    exit 0
+    ((${arg_debug})) && debug 'Main subroutines run complete.'
+    _exit 0
 }
 
-_main
+_main $*
 
