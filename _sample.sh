@@ -1,5 +1,5 @@
 function prog_sample() {
     source spinner.sh
-    sleep 10 &
+    sleep $1 &
     spinner $!
 }

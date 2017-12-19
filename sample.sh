@@ -12,6 +12,7 @@ function initialization() {
     arg_test=0
     arg_sample=0
     arg_pid=$$
+    sample_value=10
     arg_conf=0
     LOG_FILE='/var/log/sample.log'
     HOST_ID=`/bin/hostname`
@@ -109,6 +110,7 @@ function parse_options() {
             --sample_option)
                 arg_sample=1
                 [[ -n $2 ]] && sample_value=$2
+                [[ ! ${sample_value} =~ ^[0-9]+$ ]] && { help "$0: Give valid sleep time"; exit 1; }
                 shift 2 ;;
             -c)
                 CONF_FILE=$2
@@ -183,7 +185,7 @@ function _exit() {
 # Function for sample prog.
 function _sample() {
     source _sample.sh
-    prog_sample
+    prog_sample $1
 }
 
 # Function for test prog.
@@ -259,7 +261,7 @@ _main() {
     
     ((${arg_debug})) && debug 'Running main subroutines.'
     [[ ${arg_test} -eq 1 ]] && _test
-    [[ ${arg_sample} -eq 1 ]] && _sample
+    [[ ${arg_sample} -eq 1 ]] && _sample ${sample_value}
     ((${arg_debug})) && debug 'Main subroutines run complete.'
     _exit 0
 }
