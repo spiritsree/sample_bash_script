@@ -221,11 +221,11 @@ _main() {
     if [[ -e ${LOCK_FILE} ]]; then
        running_pid=`cat ${LOCK_FILE}`
        if [[ -z "${running_pid// }" ]]; then
-           info "Orphan lock exist without PID. deleting..."
-           unlink ${LOCK_FILE}
+           info "Orphan lock exist without PID. Updating new PID."
+           echo "${arg_pid}" > ${LOCK_FILE}
        elif [[ `ps aux | grep ${running_pid} | grep $0 | wc -l`  -lt 1 ]]; then
-           info "Orphan lock exist. deleting..."
-           unlink ${LOCK_FILE}
+           info "Orphan lock exist. Updating new PID."
+           echo "${arg_pid}" > ${LOCK_FILE}
        else
            info "Process already running with PID ${running_pid}"
            exit 0
