@@ -219,9 +219,17 @@ _main() {
     set -o pipefail
 
     if [[ -e ${LOCK_FILE} ]]; then
-        running_pid=`cat ${LOCK_FILE}`
-        critical "Process already running with PID ${running_pid}"
-        exit 1
+       running_pid=`cat ${LOCK_FILE}`
+       if [[ -z "${running_pid// }" ]]; then
+           info "Orphan lock exist without PID. deleting..."
+           unlink ${LOCK_FILE}
+       elif [[ `ps aux | grep ${running_pid} | grep $0 | wc -l`  -lt 1 ]]; then
+           info "Orphan lock exist. deleting..."
+           unlink ${LOCK_FILE}
+       else
+           info "Process already running with PID ${running_pid}"
+           exit 0
+       fi
     else
         ((${arg_debug})) && debug "Creating lock file ${LOCK_FILE}."
         echo "${arg_pid}" > ${LOCK_FILE}
